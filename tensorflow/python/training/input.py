@@ -40,7 +40,11 @@ want them run by N threads.
 @@shuffle_batch_join
 
 """
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
+from six.moves import xrange  # pylint: disable=redefined-builtin
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.framework import types
@@ -159,7 +163,7 @@ def range_input_producer(limit, num_epochs=None, shuffle=True, seed=None,
     is added to the current Graph's QUEUE_RUNNER collection.
   """
   with ops.op_scope([limit], name, "input_producer") as name:
-    range_tensor = math_ops.range(0, limit)
+    range_tensor = math_ops.range(limit)
     return _input_producer(
         range_tensor, types.int32, num_epochs, shuffle, seed, capacity, name,
         "fraction_of_%d_full" % capacity)
@@ -249,9 +253,9 @@ def _merge_shapes(shape_list, enqueue_many):
 def _shapes(tensor_list_list, shapes, enqueue_many):
   if shapes is None:
     l = len(tensor_list_list[0])
-    shapes = [_merge_shapes([tl[i].get_shape().as_list()
-                             for tl in tensor_list_list],
-                            enqueue_many) for i in range(l)]
+    shapes = [_merge_shapes(
+        [tl[i].get_shape().as_list() for tl in tensor_list_list], enqueue_many)
+              for i in xrange(l)]
   return shapes
 
 

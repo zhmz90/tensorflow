@@ -167,8 +167,13 @@ classes when using one of the sampled loss functions above.
 @@compute_accidental_hits
 
 """
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
+from six.moves import xrange  # pylint: disable=redefined-builtin
 from tensorflow.python.framework import ops
+from tensorflow.python.framework import tensor_shape
 from tensorflow.python.framework import types
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import candidate_sampling_ops
@@ -343,7 +348,8 @@ def dropout(x, keep_prob, noise_shape=None, seed=None, name=None):
 
   Args:
     x: A tensor.
-    keep_prob: A Python float. The probability that each element is kept.
+    keep_prob: A scalar `Tensor` with the same type as x. The probability
+      that each element is kept.
     noise_shape: A 1-D `Tensor` of type `int32`, representing the
       shape for randomly generated keep/drop flags.
     seed: A Python integer. Used to create random seeds. See
@@ -357,10 +363,15 @@ def dropout(x, keep_prob, noise_shape=None, seed=None, name=None):
   Raises:
     ValueError: If `keep_prob` is not in `(0, 1]`.
   """
-  if not (0 < keep_prob <= 1):
-    raise ValueError("Expected keep_prob in (0, 1], got %g" % keep_prob)
   with ops.op_scope([x], name, "dropout") as name:
     x = ops.convert_to_tensor(x, name="x")
+    if isinstance(keep_prob, float) and not(0 < keep_prob <= 1):
+      raise ValueError("keep_prob must be a scalar tensor or a float in the "
+                       "range (0, 1], got %g" % keep_prob)
+    keep_prob = ops.convert_to_tensor(
+        keep_prob, dtype=x.dtype, name="keep_prob")
+    keep_prob.get_shape().assert_is_compatible_with(tensor_shape.scalar())
+
     noise_shape = noise_shape or array_ops.shape(x)
     # uniform [keep_prob, 1.0 + keep_prob)
     random_tensor = keep_prob
@@ -368,7 +379,9 @@ def dropout(x, keep_prob, noise_shape=None, seed=None, name=None):
         noise_shape, seed=seed, dtype=x.dtype)
     # 0. if [keep_prob, 1.0) and 1. if [1.0, 1.0 + keep_prob)
     binary_tensor = math_ops.floor(random_tensor)
-    return x * (1.0 / keep_prob) * binary_tensor
+    ret = x * math_ops.inv(keep_prob) * binary_tensor
+    ret.set_shape(x.get_shape())
+    return ret
 
 
 def depthwise_conv2d(input, filter, strides, padding, name=None):
@@ -526,15 +539,24 @@ def moments(x, axes, name=None):
     name: Name used to scope the operations that compute the moments.
 
   Returns:
-    Two `Tensors`: `mean` and `variance`.
+    Two `Tensor` objects: `mean` and `variance`.
   """
   with ops.op_scope([x, axes], name, "moments"):
     x = ops.convert_to_tensor(x, name="x")
-    divisor = 1.0
-    for d in xrange(len(x.get_shape())):
-      if d in axes:
+    x_shape = x.get_shape()
+    if all(x_shape[d].value is not None for d in axes):
+      # The shape is known in the relevant axes, so we can statically
+      # compute the divisor.
+      divisor = 1.0
+      for d in set(axes):
         divisor *= x.get_shape()[d].value
-    divisor = constant_op.constant(1.0 / divisor, x.dtype, name="divisor")
+      divisor = constant_op.constant(1.0 / divisor, x.dtype, name="divisor")
+    else:
+      divisor = constant_op.constant(1.0, dtype=x.dtype)
+      x_dynamic_shape = array_ops.shape(x)
+      for d in set(axes):
+        divisor *= math_ops.cast(x_dynamic_shape[d], x.dtype)
+      divisor = math_ops.inv(divisor, name="divisor")
     axes = constant_op.constant(axes, name="axes")
     # Note: We do not use Mean here because it is very slow on GPU.
     # Note 2: The expression below is potentially more stable.

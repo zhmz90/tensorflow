@@ -20,7 +20,7 @@ DEFINE_bool(record_mem_types, false,
 DEFINE_bool(brain_mem_reg_cuda_dma, true,
             "If true, register CPU RAM used to copy to/from GPU RAM "
             "with the CUDA driver.");
-DEFINE_bool(brain_gpu_use_bfc_allocator, false,
+DEFINE_bool(brain_gpu_use_bfc_allocator, true,
             "If true, uses the Best-Fit GPU allocator.");
 DEFINE_bool(brain_gpu_region_allocator_debug, false,
             "If true, checks for memory overwrites by writing "
@@ -34,7 +34,7 @@ bool FLAGS_record_mem_types = false;
 bool FLAGS_brain_mem_reg_cuda_dma = true;
 bool FLAGS_brain_gpu_region_allocator_debug = false;
 bool FLAGS_brain_gpu_region_allocator_reset_to_nan = false;
-bool FLAGS_brain_gpu_use_bfc_allocator = false;
+bool FLAGS_brain_gpu_use_bfc_allocator = true;
 #endif
 
 namespace gpu = ::perftools::gputools;
@@ -87,7 +87,8 @@ void ProcessState::SetGPUCount(int c) {
 
 int ProcessState::GPUCount() const { return gpu_count_; }
 
-Allocator* ProcessState::GetGPUAllocator(int gpu_id, size_t total_bytes) {
+Allocator* ProcessState::GetGPUAllocator(int gpu_id, size_t total_bytes,
+                                         const string& allocator_type) {
 #if GOOGLE_CUDA
   mutex_lock lock(mu_);
   gpu::Platform* gpu_platform = GPUMachineManager();
@@ -104,7 +105,13 @@ Allocator* ProcessState::GetGPUAllocator(int gpu_id, size_t total_bytes) {
   if (gpu_allocators_[gpu_id] == nullptr) {
     VisitableAllocator* gpu_allocator;
 
-    if (FLAGS_brain_gpu_use_bfc_allocator) {
+    // Validate allocator types.
+    if (!allocator_type.empty() && allocator_type != "BFC") {
+      LOG(ERROR) << "Invalid allocator type: " << allocator_type;
+      return nullptr;
+    }
+
+    if (FLAGS_brain_gpu_use_bfc_allocator || allocator_type == "BFC") {
       gpu_allocator = new GPUBFCAllocator(gpu_id, total_bytes);
     } else {
       gpu_allocator = new GPURegionAllocator(gpu_id, total_bytes);
